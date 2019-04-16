@@ -24,6 +24,7 @@
     "graphql-elasticsearch-transformer": "^3.5.1",
     "graphql-transformer-common": "^3.5.1",
     "graphql-transformer-core": "^3.5.1",
+    "graphql-http-transformer": "^3.4.1",
     "graphql-versioned-transformer": "^3.4.1",
     "ini": "^1.3.5",
     "inquirer": "^6.0.0",

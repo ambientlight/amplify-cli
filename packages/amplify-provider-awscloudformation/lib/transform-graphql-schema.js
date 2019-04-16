@@ -7,6 +7,7 @@ const ModelAuthTransformer = require('graphql-auth-transformer').default;
 const ModelConnectionTransformer = require('graphql-connection-transformer').default;
 const SearchableModelTransformer = require('graphql-elasticsearch-transformer').default;
 const VersionedModelTransformer = require('graphql-versioned-transformer').default;
+const HTTPTransformer = require('graphql-http-transformer').default;
 const providerName = require('./constants').ProviderName;
 const TransformPackage = require('graphql-transformer-core');
 
@@ -210,6 +211,7 @@ async function transformGraphQLSchema(context, options) {
     new DynamoDBModelTransformer(getModelConfig(project)),
     new ModelConnectionTransformer(),
     new ModelAuthTransformer({ authMode }),
+    new HTTPTransformer(),
     new VersionedModelTransformer(),
   ];
 
