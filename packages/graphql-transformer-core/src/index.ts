@@ -16,6 +16,7 @@ import {
     loadProject as readProjectConfiguration,
     loadConfig as readTransformerConfiguration,
     writeConfig as writeTransformerConfiguration,
+    TRANSFORM_CONFIG_FILE_NAME
 } from './util/transformConfig'
 
 export * from './errors'
@@ -38,4 +39,5 @@ export {
     readTransformerConfiguration,
     writeTransformerConfiguration,
     revertAPIMigration,
+    TRANSFORM_CONFIG_FILE_NAME
 }
