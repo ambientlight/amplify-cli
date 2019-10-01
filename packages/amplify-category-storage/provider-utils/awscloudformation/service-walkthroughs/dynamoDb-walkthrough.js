@@ -666,6 +666,7 @@ async function addTrigger(context, resourceName, triggerList) {
       Type: 'AWS::Lambda::EventSourceMapping',
       DependsOn: [
         `${resourceName}TriggerPolicy`,
+        'LambdaExecutionRole',
       ],
       Properties: {
         BatchSize: 100,
