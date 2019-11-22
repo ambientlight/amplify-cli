@@ -12,9 +12,9 @@ import {
   DirectiveDefinitionNode,
   TypeDefinitionNode,
 } from 'graphql';
-import TransformerContext from './TransformerContext';
+import { TransformerContext } from './TransformerContext';
 
-export default interface ITransformer {
+export interface ITransformer {
   name: string;
 
   directive: DirectiveDefinitionNode;
@@ -57,6 +57,8 @@ export default interface ITransformer {
     directive: DirectiveNode,
     acc: TransformerContext
   ) => void;
+
+  getDirective(): string;
 
   /**
    * A transformer implements a single function per location that its directive can be applied.

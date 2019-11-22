@@ -20,7 +20,6 @@ import {
   ObjectValueNode,
   InputObjectTypeDefinitionNode,
 } from 'graphql';
-import { access } from 'fs';
 
 type ScalarMap = {
   [k: string]: 'String' | 'Int' | 'Float' | 'Boolean' | 'ID';
@@ -256,6 +255,18 @@ export function extendFieldWithDirectives(field: FieldDefinitionNode, directives
 export function makeInputObjectDefinition(name: string, inputs: InputValueDefinitionNode[]): InputObjectTypeDefinitionNode {
   return {
     kind: 'InputObjectTypeDefinition',
+    name: {
+      kind: 'Name',
+      value: name,
+    },
+    fields: inputs,
+    directives: [],
+  };
+}
+
+export function makeObjectDefinition(name: string, inputs: FieldDefinitionNode[]): ObjectTypeDefinitionNode {
+  return {
+    kind: Kind.OBJECT_TYPE_DEFINITION,
     name: {
       kind: 'Name',
       value: name,

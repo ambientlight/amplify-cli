@@ -1,6 +1,6 @@
 import path from 'path';
 
-export default class AmplifyToolkit {
+export class AmplifyToolkit {
   private _buildResources: any;
   private _confirmPrompt: any;
   private _constants: any;
@@ -65,6 +65,7 @@ export default class AmplifyToolkit {
   private _getTriggerPermissions: any;
   private _getTriggerEnvVariables: any;
   private _getTriggerEnvInputs: any;
+  private _getUserPoolGroupList: any;
 
   private _amplifyHelpersDirPath: string = path.normalize(path.join(__dirname, '../extensions/amplify-helpers'));
 
@@ -366,5 +367,10 @@ export default class AmplifyToolkit {
     this._getTriggerEnvInputs =
       this._getTriggerEnvInputs || require(path.join(this._amplifyHelpersDirPath, 'trigger-flow')).getTriggerEnvInputs;
     return this._getTriggerEnvInputs;
+  }
+  get getUserPoolGroupList(): any {
+    this._getUserPoolGroupList =
+      this._getUserPoolGroupList || require(path.join(this._amplifyHelpersDirPath, 'get-userpoolgroup-list')).getUserPoolGroupList;
+    return this._getUserPoolGroupList;
   }
 }

@@ -1,10 +1,10 @@
-import ModelAuthTransformer from 'graphql-auth-transformer';
-import DynamoDBModelTransformer from 'graphql-dynamodb-transformer';
-import GraphQLTransform from 'graphql-transformer-core';
+import { ModelAuthTransformer } from 'graphql-auth-transformer';
+import { DynamoDBModelTransformer } from 'graphql-dynamodb-transformer';
+import { GraphQLTransform } from 'graphql-transformer-core';
 import { deploy, launchDDBLocal, terminateDDB } from './utils/index';
 import AWSAppSyncClient, { AUTH_TYPE } from 'aws-appsync';
 import { signUpAddToGroupAndGetJwtToken } from './utils/cognito-utils';
-import { AWS } from '@aws-amplify/core';
+import AWS = require('aws-sdk');
 import gql from 'graphql-tag';
 import 'isomorphic-fetch';
 
