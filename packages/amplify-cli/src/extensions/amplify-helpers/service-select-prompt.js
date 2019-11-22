@@ -7,7 +7,7 @@ function filterServicesByEnabledProviders(context, enabledProviders, supportedSe
 
   const filteredServices = [];
 
-  Object.keys(supportedServices).forEach((service) => {
+  Object.keys(supportedServices).forEach(service => {
     if (enabledProviders.includes(supportedServices[service].provider)) {
       filteredServices.push({
         service,
@@ -21,7 +21,7 @@ function filterServicesByEnabledProviders(context, enabledProviders, supportedSe
   return filteredServices;
 }
 
-function serviceQuestionWalkthrough(context, supportedServices, category) {
+function serviceQuestionWalkthrough(context, supportedServices, category, customQuestion = null) {
   const options = [];
 
   for (let i = 0; i < supportedServices.length; i += 1) {
@@ -43,26 +43,27 @@ function serviceQuestionWalkthrough(context, supportedServices, category) {
   if (options.length === 1) {
     // No need to ask questions
     context.print.info(`Using service: ${options[0].value.service}, provided by: ${options[0].value.providerName}`);
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       resolve(options[0].value);
     });
   }
 
-  const question = [{
-    name: 'service',
-    message: 'Please select from one of the below mentioned services',
-    type: 'list',
-    choices: options,
-  }];
+  const question = [
+    {
+      name: 'service',
+      message: customQuestion || 'Please select from one of the below mentioned services:',
+      type: 'list',
+      choices: options,
+    },
+  ];
 
-  return inquirer.prompt(question)
-    .then(answer => answer.service);
+  return inquirer.prompt(question).then(answer => answer.service);
 }
 
-function serviceSelectionPrompt(context, category, supportedServices) {
+function serviceSelectionPrompt(context, category, supportedServices, customQuestion = null) {
   const { providers } = getProjectConfig();
   supportedServices = filterServicesByEnabledProviders(context, providers, supportedServices);
-  return serviceQuestionWalkthrough(context, supportedServices, category);
+  return serviceQuestionWalkthrough(context, supportedServices, category, customQuestion);
 }
 
 module.exports = {

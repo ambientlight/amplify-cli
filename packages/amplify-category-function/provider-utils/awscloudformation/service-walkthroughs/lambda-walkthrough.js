@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const inquirer = require('inquirer');
 const path = require('path');
+const TransformPackage = require('graphql-transformer-core');
 
 const categoryName = 'function';
 const serviceName = 'Lambda';
@@ -17,7 +18,6 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
   let dependsOn = [];
   const parameters = {};
   // Ask resource and Lambda function name
-
 
   const resourceQuestions = [
     {
@@ -69,11 +69,7 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
     const dynamoAnswers = await askDynamoDBQuestions(context, inputs);
 
     const tableParameters = await getTableParameters(context, dynamoAnswers);
-    Object.assign(
-      dynamoAnswers,
-      { category: 'storage' },
-      { tableDefinition: { ...tableParameters } },
-    );
+    Object.assign(dynamoAnswers, { category: 'storage' }, { tableDefinition: { ...tableParameters } });
     Object.assign(allDefaultValues, { database: dynamoAnswers });
 
     if (!dynamoAnswers.Arn) {
@@ -95,11 +91,7 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
 
   let topLevelComment;
   if (await context.amplify.confirmPrompt.run('Do you want to access other resources created in this project from your Lambda function?')) {
-    ({ topLevelComment } = await askExecRolePermissionsQuestions(
-      context,
-      allDefaultValues,
-      parameters,
-    ));
+    ({ topLevelComment } = await askExecRolePermissionsQuestions(context, allDefaultValues, parameters));
   }
   allDefaultValues.parameters = parameters;
   allDefaultValues.topLevelComment = topLevelComment;
@@ -109,9 +101,7 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
 
 async function updateWalkthrough(context, lambdaToUpdate) {
   const { allResources } = await context.amplify.getResourceStatus();
-  const resources = allResources
-    .filter(resource => resource.service === serviceName)
-    .map(resource => resource.resourceName);
+  const resources = allResources.filter(resource => resource.service === serviceName).map(resource => resource.resourceName);
 
   if (resources.length === 0) {
     context.print.error('No Lambda Functions resource to update. Please use "amplify add function" command to create a new Function');
@@ -119,32 +109,29 @@ async function updateWalkthrough(context, lambdaToUpdate) {
     return;
   }
 
-  const resourceQuestion = [{
-    name: 'resourceName',
-    message: 'Please select the Lambda Function you would want to update',
-    type: 'list',
-    choices: resources,
-  }];
+  const resourceQuestion = [
+    {
+      name: 'resourceName',
+      message: 'Please select the Lambda Function you would want to update',
+      type: 'list',
+      choices: resources,
+    },
+  ];
 
   const newParams = {};
   const answers = {};
   const currentDefaults = {};
   let dependsOn;
 
-  const resourceAnswer = !lambdaToUpdate ?
-    await inquirer.prompt(resourceQuestion) :
-    { resourceName: lambdaToUpdate };
+  const resourceAnswer = !lambdaToUpdate ? await inquirer.prompt(resourceQuestion) : { resourceName: lambdaToUpdate };
   answers.resourceName = resourceAnswer.resourceName;
 
   const projectBackendDirPath = context.amplify.pathManager.getBackendDirPath();
-  const resourceDirPath = path.join(
-    projectBackendDirPath, categoryName,
-    resourceAnswer.resourceName,
-  );
+  const resourceDirPath = path.join(projectBackendDirPath, categoryName, resourceAnswer.resourceName);
   const parametersFilePath = path.join(resourceDirPath, functionParametersFileName);
   let currentParameters;
   try {
-    currentParameters = JSON.parse(fs.readFileSync(parametersFilePath));
+    currentParameters = context.amplify.readJsonFile(parametersFilePath);
   } catch (e) {
     currentParameters = {};
   }
@@ -153,7 +140,11 @@ async function updateWalkthrough(context, lambdaToUpdate) {
     currentDefaults.categoryPermissionMap = currentParameters.permissions;
   }
 
-  if (await context.amplify.confirmPrompt.run('Do you want to update permissions granted to this Lambda function to perform on other resources in your project?')) {
+  if (
+    await context.amplify.confirmPrompt.run(
+      'Do you want to update permissions granted to this Lambda function to perform on other resources in your project?'
+    )
+  ) {
     // Get current dependsOn for the resource
 
     const amplifyMetaFilePath = context.amplify.pathManager.getAmplifyMetaFilePath();
@@ -161,39 +152,27 @@ async function updateWalkthrough(context, lambdaToUpdate) {
     const resourceDependsOn = amplifyMeta.function[answers.resourceName].dependsOn || [];
     answers.dependsOn = resourceDependsOn;
 
-    const { topLevelComment } = await askExecRolePermissionsQuestions(
-      context,
-      answers, newParams,
-      currentDefaults,
-    );
+    const { topLevelComment } = await askExecRolePermissionsQuestions(context, answers, newParams, currentDefaults);
 
     const cfnFileName = `${resourceAnswer.resourceName}-cloudformation-template.json`;
     const cfnFilePath = path.join(resourceDirPath, cfnFileName);
-    const cfnContent = JSON.parse(fs.readFileSync(cfnFilePath));
+    const cfnContent = context.amplify.readJsonFile(cfnFilePath);
     const dependsOnParams = { env: { Type: 'String' } };
 
-    Object.keys(answers.resourcePropertiesJSON).forEach((resourceProperty) => {
+    Object.keys(answers.resourcePropertiesJSON).forEach(resourceProperty => {
       dependsOnParams[answers.resourcePropertiesJSON[resourceProperty].Ref] = {
         Type: 'String',
         Default: answers.resourcePropertiesJSON[resourceProperty].Ref,
       };
     });
 
-
-    cfnContent.Parameters = getNewCFNParameters(
-      cfnContent.Parameters,
-      currentParameters,
-      dependsOnParams,
-      newParams,
-    );
+    cfnContent.Parameters = getNewCFNParameters(cfnContent.Parameters, currentParameters, dependsOnParams, newParams);
 
     Object.assign(answers.resourcePropertiesJSON, { ENV: { Ref: 'env' }, REGION: { Ref: 'AWS::Region' } });
 
     if (!cfnContent.Resources.AmplifyResourcesPolicy) {
       cfnContent.Resources.AmplifyResourcesPolicy = {
-        DependsOn: [
-          'LambdaExecutionRole',
-        ],
+        DependsOn: ['LambdaExecutionRole'],
         Type: 'AWS::IAM::Policy',
         Properties: {
           PolicyName: 'amplify-lambda-execution-policy',
@@ -213,20 +192,18 @@ async function updateWalkthrough(context, lambdaToUpdate) {
     if (answers.categoryPolicies.length === 0) {
       delete cfnContent.Resources.AmplifyResourcesPolicy;
     } else {
-      cfnContent.Resources.AmplifyResourcesPolicy.Properties.PolicyDocument.Statement =
-      answers.categoryPolicies;
+      cfnContent.Resources.AmplifyResourcesPolicy.Properties.PolicyDocument.Statement = answers.categoryPolicies;
     }
 
-    cfnContent.Resources.LambdaFunction.Properties.Environment.Variables =
-      getNewCFNEnvVariables(
-        cfnContent.Resources.LambdaFunction.Properties.Environment.Variables,
-        currentParameters,
-        answers.resourcePropertiesJSON,
-        newParams,
-      ); // Need to update
+    cfnContent.Resources.LambdaFunction.Properties.Environment.Variables = getNewCFNEnvVariables(
+      cfnContent.Resources.LambdaFunction.Properties.Environment.Variables,
+      currentParameters,
+      answers.resourcePropertiesJSON,
+      newParams
+    ); // Need to update
     // Update top level comment in app.js or index.js file
 
-    const updateTopLevelComment = (filePath) => {
+    const updateTopLevelComment = filePath => {
       const commentRegex = /\/\* Amplify Params - DO NOT EDIT[a-zA-Z0-9\-\s._=]+Amplify Params - DO NOT EDIT \*\//;
       let fileContents = fs.readFileSync(filePath).toString();
       const commentMatches = fileContents.match(commentRegex);
@@ -255,33 +232,28 @@ async function updateWalkthrough(context, lambdaToUpdate) {
   return { answers, dependsOn };
 }
 
-function getNewCFNEnvVariables(
-  oldCFNEnvVariables,
-  currentDefaults,
-  newCFNEnvVariables,
-  newDefaults,
-) {
+function getNewCFNEnvVariables(oldCFNEnvVariables, currentDefaults, newCFNEnvVariables, newDefaults) {
   const currentResources = [];
   const newResources = [];
   const deletedResources = [];
 
   if (currentDefaults.permissions) {
-    Object.keys(currentDefaults.permissions).forEach((category) => {
-      Object.keys(currentDefaults.permissions[category]).forEach((resourceName) => {
+    Object.keys(currentDefaults.permissions).forEach(category => {
+      Object.keys(currentDefaults.permissions[category]).forEach(resourceName => {
         currentResources.push(`${category.toUpperCase()}_${resourceName.toUpperCase()}_`);
       });
     });
   }
 
   if (newDefaults.permissions) {
-    Object.keys(newDefaults.permissions).forEach((category) => {
-      Object.keys(newDefaults.permissions[category]).forEach((resourceName) => {
+    Object.keys(newDefaults.permissions).forEach(category => {
+      Object.keys(newDefaults.permissions[category]).forEach(resourceName => {
         newResources.push(`${category.toUpperCase()}_${resourceName.toUpperCase()}_`);
       });
     });
   }
 
-  currentResources.forEach((resourceName) => {
+  currentResources.forEach(resourceName => {
     if (newResources.indexOf(resourceName) === -1) {
       deletedResources.push(resourceName);
     }
@@ -289,7 +261,7 @@ function getNewCFNEnvVariables(
 
   const toBeDeletedEnvVariables = [];
 
-  Object.keys(oldCFNEnvVariables).forEach((envVar) => {
+  Object.keys(oldCFNEnvVariables).forEach(envVar => {
     for (let i = 0; i < deletedResources.length; i += 1) {
       if (envVar.includes(deletedResources[i])) {
         toBeDeletedEnvVariables.push(envVar);
@@ -298,7 +270,7 @@ function getNewCFNEnvVariables(
     }
   });
 
-  toBeDeletedEnvVariables.forEach((envVar) => {
+  toBeDeletedEnvVariables.forEach(envVar => {
     delete oldCFNEnvVariables[envVar];
   });
 
@@ -307,34 +279,28 @@ function getNewCFNEnvVariables(
   return oldCFNEnvVariables;
 }
 
-function getNewCFNParameters(
-  oldCFNParameters,
-  currentDefaults,
-  newCFNResourceParameters,
-  newDefaults,
-) {
+function getNewCFNParameters(oldCFNParameters, currentDefaults, newCFNResourceParameters, newDefaults) {
   const currentResources = [];
   const newResources = [];
   const deletedResources = [];
 
-
   if (currentDefaults.permissions) {
-    Object.keys(currentDefaults.permissions).forEach((category) => {
-      Object.keys(currentDefaults.permissions[category]).forEach((resourceName) => {
+    Object.keys(currentDefaults.permissions).forEach(category => {
+      Object.keys(currentDefaults.permissions[category]).forEach(resourceName => {
         currentResources.push(`${category}${resourceName}`);
       });
     });
   }
 
   if (newDefaults.permissions) {
-    Object.keys(newDefaults.permissions).forEach((category) => {
-      Object.keys(newDefaults.permissions[category]).forEach((resourceName) => {
+    Object.keys(newDefaults.permissions).forEach(category => {
+      Object.keys(newDefaults.permissions[category]).forEach(resourceName => {
         newResources.push(`${category}${resourceName}`);
       });
     });
   }
 
-  currentResources.forEach((resourceName) => {
+  currentResources.forEach(resourceName => {
     if (newResources.indexOf(resourceName) === -1) {
       deletedResources.push(resourceName);
     }
@@ -342,7 +308,7 @@ function getNewCFNParameters(
 
   const toBeDeletedParameters = [];
 
-  Object.keys(oldCFNParameters).forEach((parameter) => {
+  Object.keys(oldCFNParameters).forEach(parameter => {
     for (let i = 0; i < deletedResources.length; i += 1) {
       if (parameter.includes(deletedResources[i])) {
         toBeDeletedParameters.push(parameter);
@@ -350,7 +316,7 @@ function getNewCFNParameters(
       }
     }
   });
-  toBeDeletedParameters.forEach((parameter) => {
+  toBeDeletedParameters.forEach(parameter => {
     delete oldCFNParameters[parameter];
   });
 
@@ -359,14 +325,9 @@ function getNewCFNParameters(
   return oldCFNParameters;
 }
 
-
-async function askExecRolePermissionsQuestions(
-  context,
-  allDefaultValues,
-  parameters, currentDefaults,
-) {
+async function askExecRolePermissionsQuestions(context, allDefaultValues, parameters, currentDefaults) {
   const amplifyMetaFilePath = context.amplify.pathManager.getAmplifyMetaFilePath();
-  const amplifyMeta = JSON.parse(fs.readFileSync(amplifyMetaFilePath));
+  const amplifyMeta = context.amplify.readJsonFile(amplifyMetaFilePath);
 
   let categories = Object.keys(amplifyMeta);
   categories = categories.filter(category => category !== 'providers');
@@ -376,7 +337,7 @@ async function askExecRolePermissionsQuestions(
     name: 'categories',
     message: 'Select the category',
     choices: categories,
-    default: (currentDefaults ? currentDefaults.categories : undefined),
+    default: currentDefaults ? currentDefaults.categories : undefined,
   };
   const capitalizeFirstLetter = str => str.charAt(0).toUpperCase() + str.slice(1);
   const categoryPermissionAnswer = await inquirer.prompt([categoryPermissionQuestion]);
@@ -397,7 +358,6 @@ async function askExecRolePermissionsQuestions(
       continue;
     }
 
-
     try {
       const { getPermissionPolicies } = require(categoryPlugins[category]);
       if (!getPermissionPolicies) {
@@ -413,17 +373,18 @@ async function askExecRolePermissionsQuestions(
           const resourceQuestion = {
             type: 'checkbox',
             name: 'resources',
-            message: `${capitalizeFirstLetter(category)} has ${resourcesList.length} resources in this project. Select the one you would like your Lambda to access`,
+            message: `${capitalizeFirstLetter(category)} has ${
+              resourcesList.length
+            } resources in this project. Select the one you would like your Lambda to access`,
             choices: resourcesList,
-            validate: (value) => {
+            validate: value => {
               if (value.length === 0) {
                 return 'You must select at least resource';
               }
               return true;
             },
             default: () => {
-              if (currentDefaults && currentDefaults.categoryPermissionMap &&
-               currentDefaults.categoryPermissionMap[category]) {
+              if (currentDefaults && currentDefaults.categoryPermissionMap && currentDefaults.categoryPermissionMap[category]) {
                 return Object.keys(currentDefaults.categoryPermissionMap[category]);
               }
             },
@@ -440,7 +401,7 @@ async function askExecRolePermissionsQuestions(
             name: 'crudOptions',
             message: `Select the operations you want to permit for ${resourceName}`,
             choices: crudOptions,
-            validate: (value) => {
+            validate: value => {
               if (value.length === 0) {
                 return 'You must select at least one operation';
               }
@@ -448,9 +409,12 @@ async function askExecRolePermissionsQuestions(
               return true;
             },
             default: () => {
-              if (currentDefaults && currentDefaults.categoryPermissionMap
-                && currentDefaults.categoryPermissionMap[category]
-                && currentDefaults.categoryPermissionMap[category][resourceName]) {
+              if (
+                currentDefaults &&
+                currentDefaults.categoryPermissionMap &&
+                currentDefaults.categoryPermissionMap[category] &&
+                currentDefaults.categoryPermissionMap[category][resourceName]
+              ) {
                 return currentDefaults.categoryPermissionMap[category][resourceName];
               }
             },
@@ -463,8 +427,7 @@ async function askExecRolePermissionsQuestions(
           parameters.permissions[category][resourceName] = crudPermissionAnswer.crudOptions;
         }
         if (selectedResources.length > 0) {
-          const { permissionPolicies, resourceAttributes } =
-          await getPermissionPolicies(context, parameters.permissions[category]);
+          const { permissionPolicies, resourceAttributes } = await getPermissionPolicies(context, parameters.permissions[category]);
           categoryPolicies = categoryPolicies.concat(permissionPolicies);
           resources = resources.concat(resourceAttributes);
         }
@@ -479,9 +442,9 @@ async function askExecRolePermissionsQuestions(
   const resourceProperties = [];
   const resourcePropertiesJSON = {};
   const categoryMapping = {};
-  resources.forEach((resource) => {
+  resources.forEach(resource => {
     const { category, resourceName, attributes } = resource;
-    attributes.forEach((attribute) => {
+    attributes.forEach(attribute => {
       const envName = `${category.toUpperCase()}_${resourceName.toUpperCase()}_${attribute.toUpperCase()}`;
       const varName = `${category}${capitalizeFirstLetter(resourceName)}${capitalizeFirstLetter(attribute)}`;
       const refName = `${category}${resourceName}${attribute}`;
@@ -498,9 +461,8 @@ async function askExecRolePermissionsQuestions(
       allDefaultValues.dependsOn = [];
     }
 
-
     let resourceExists = false;
-    allDefaultValues.dependsOn.forEach((amplifyResource) => {
+    allDefaultValues.dependsOn.forEach(amplifyResource => {
       if (amplifyResource.resourceName === resourceName) {
         resourceExists = true;
       }
@@ -524,9 +486,9 @@ async function askExecRolePermissionsQuestions(
   terminalOutput += 'var environment = process.env.ENV\n';
   terminalOutput += 'var region = process.env.REGION\n';
 
-  Object.keys(categoryMapping).forEach((category) => {
+  Object.keys(categoryMapping).forEach(category => {
     if (categoryMapping[category].length > 0) {
-      categoryMapping[category].forEach((args) => {
+      categoryMapping[category].forEach(args => {
         terminalOutput += `var ${args.varName} = process.env.${args.envName}\n`;
       });
     }
@@ -539,14 +501,12 @@ async function askExecRolePermissionsQuestions(
 }
 
 async function getTableParameters(context, dynamoAnswers) {
-  if (dynamoAnswers.Arn) { // Looking for table parameters on DynamoDB public API
+  if (dynamoAnswers.Arn) {
+    // Looking for table parameters on DynamoDB public API
     const hashKey = dynamoAnswers.KeySchema.find(attr => attr.KeyType === 'HASH') || {};
-    const hashType = dynamoAnswers.AttributeDefinitions.find(attr =>
-      attr.AttributeName === hashKey.AttributeName) || {};
-    const rangeKey = dynamoAnswers.KeySchema.find(attr =>
-      attr.KeyType === 'RANGE') || {};
-    const rangeType = dynamoAnswers.AttributeDefinitions.find(attr =>
-      attr.AttributeName === rangeKey.AttributeName) || {};
+    const hashType = dynamoAnswers.AttributeDefinitions.find(attr => attr.AttributeName === hashKey.AttributeName) || {};
+    const rangeKey = dynamoAnswers.KeySchema.find(attr => attr.KeyType === 'RANGE') || {};
+    const rangeType = dynamoAnswers.AttributeDefinitions.find(attr => attr.AttributeName === rangeKey.AttributeName) || {};
     return {
       tableName: dynamoAnswers.TableName,
       partitionKeyName: hashKey.AttributeName,
@@ -587,91 +547,81 @@ async function askEventSourceQuestions(context, inputs) {
   let arnQuestion;
   let arnAnswer;
   let eventSourceArn;
-  let dynamoDBStreamKindInput;
-  let dynamoDbStreamKindQuestion;
-  let dynamoDbStreamKindAnswer;
-  let dynamoDbStreamKind;
+  let streamKindInput;
+  let streamKindQuestion;
+  let streamKindAnswer;
+  let streamKind;
   let dynamoDBCategoryStorageRes;
   let dynamoDBCategoryStorageStreamArnRef;
   switch (eventSourceTypeAnswer[eventSourceTypeInput.key]) {
     case 'kinesis':
-      arnInput = inputs.find(input => input.key === 'amazonKinesisStreamARN');
-      if (arnInput === undefined) {
-        throw Error('Unable to find amazonKinesisStreamARN question data. (this is likely an amplify error, please report)');
+      streamKindInput = inputs.find(input => input.key === 'kinesisStreamKind');
+      if (streamKindInput === undefined) {
+        throw Error('Unable to find kinesisStreamKind question data. (this is likely an amplify error, please report)');
       }
-      arnQuestion = {
-        name: arnInput.key,
-        message: arnInput.question,
-        validate: context.amplify.inputValidation(arnInput),
+      streamKindQuestion = {
+        type: streamKindInput.type,
+        name: streamKindInput.key,
+        message: streamKindInput.question,
+        choices: streamKindInput.options,
       };
-      arnAnswer = await inquirer.prompt([arnQuestion]);
-      eventSourceArn = arnAnswer[arnInput.key];
-      return {
-        triggerEventSourceMapping: {
-          batchSize: 100,
-          startingPosition: 'LATEST',
-          eventSourceArn,
-          functionTemplateName: 'trigger-custom.js',
-          triggerPolicies: [{
-            Effect: 'Allow',
-            Action: [
-              'kinesis:DescribeStream',
-              'kinesis:DescribeStreamSummary',
-              'kinesis:GetRecords',
-              'kinesis:GetShardIterator',
-              'kinesis:ListShards',
-              'kinesis:ListStreams',
-              'kinesis:SubscribeToShard',
-            ],
-            Resource: eventSourceArn,
-          }],
-        },
-      };
-
-    case 'sqs':
-      arnInput = inputs.find(input => input.key === 'amazonSQSQueueARN');
-      if (arnInput === undefined) {
-        throw Error('Unable to find amazonSQSQueueARN question data. (this is likely an amplify error, please report)');
+      streamKindAnswer = await inquirer.prompt([streamKindQuestion]);
+      streamKind = streamKindAnswer[streamKindInput.key];
+      switch (streamKind) {
+        case 'kinesisStreamRawARN':
+          arnInput = inputs.find(input => input.key === 'amazonKinesisStreamARN');
+          if (arnInput === undefined) {
+            throw Error('Unable to find amazonKinesisStreamARN question data. (this is likely an amplify error, please report)');
+          }
+          arnQuestion = {
+            name: arnInput.key,
+            message: arnInput.question,
+            validate: context.amplify.inputValidation(arnInput),
+          };
+          arnAnswer = await inquirer.prompt([arnQuestion]);
+          eventSourceArn = arnAnswer[arnInput.key];
+          return {
+            triggerEventSourceMapping: {
+              batchSize: 100,
+              startingPosition: 'LATEST',
+              eventSourceArn,
+              functionTemplateName: 'trigger-custom.js',
+              triggerPolicies: [
+                {
+                  Effect: 'Allow',
+                  Action: [
+                    'kinesis:DescribeStream',
+                    'kinesis:DescribeStreamSummary',
+                    'kinesis:GetRecords',
+                    'kinesis:GetShardIterator',
+                    'kinesis:ListShards',
+                    'kinesis:ListStreams',
+                    'kinesis:SubscribeToShard',
+                  ],
+                  Resource: eventSourceArn,
+                },
+              ],
+            },
+          };
+        case 'analyticsKinesisStream':
+          return await askAnalyticsCategoryKinesisQuestions(context, inputs);
+        default:
+          return {};
       }
-      arnQuestion = {
-        name: arnInput.key,
-        message: arnInput.question,
-        validate: context.amplify.inputValidation(arnInput),
-      };
-      arnAnswer = await inquirer.prompt([arnQuestion]);
-      eventSourceArn = arnAnswer[arnQuestion.key];
-      return {
-        triggerEventSourceMapping: {
-          batchSize: 10,
-          startingPosition: 'LATEST',
-          eventSourceArn,
-          functionTemplateName: 'trigger-custom.js',
-          triggerPolicies: [{
-            Effect: 'Allow',
-            Action: [
-              'sqs:ReceiveMessage',
-              'sqs:DeleteMessage',
-              'sqs:GetQueueAttributes',
-            ],
-            Resource: eventSourceArn,
-          }],
-        },
-      };
-
     case 'dynamoDB':
-      dynamoDBStreamKindInput = inputs.find(input => input.key === 'dynamoDbStreamKind');
-      if (dynamoDBStreamKindInput === undefined) {
+      streamKindInput = inputs.find(input => input.key === 'dynamoDbStreamKind');
+      if (streamKindInput === undefined) {
         throw Error('Unable to find dynamoDBStreamKindInput question data. (this is likely an amplify error, please report)');
       }
-      dynamoDbStreamKindQuestion = {
-        type: dynamoDBStreamKindInput.type,
-        name: dynamoDBStreamKindInput.key,
-        message: dynamoDBStreamKindInput.question,
-        choices: dynamoDBStreamKindInput.options,
+      streamKindQuestion = {
+        type: streamKindInput.type,
+        name: streamKindInput.key,
+        message: streamKindInput.question,
+        choices: streamKindInput.options,
       };
-      dynamoDbStreamKindAnswer = await inquirer.prompt([dynamoDbStreamKindQuestion]);
-      dynamoDbStreamKind = dynamoDbStreamKindAnswer[dynamoDBStreamKindInput.key];
-      switch (dynamoDbStreamKind) {
+      streamKindAnswer = await inquirer.prompt([streamKindQuestion]);
+      streamKind = streamKindAnswer[streamKindInput.key];
+      switch (streamKind) {
         case 'dynamoDbStreamRawARN':
           arnInput = inputs.find(input => input.key === 'dynamoDbARN');
           if (arnInput === undefined) {
@@ -690,16 +640,13 @@ async function askEventSourceQuestions(context, inputs) {
               startingPosition: 'LATEST',
               eventSourceArn,
               functionTemplateName: 'trigger-dynamodb.js',
-              triggerPolicies: [{
-                Effect: 'Allow',
-                Action: [
-                  'dynamodb:DescribeStream',
-                  'dynamodb:GetRecords',
-                  'dynamodb:GetShardIterator',
-                  'dynamodb:ListStreams',
-                ],
-                Resource: eventSourceArn,
-              }],
+              triggerPolicies: [
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+                  Resource: eventSourceArn,
+                },
+              ],
             },
           };
         case 'graphqlModelTable':
@@ -716,22 +663,21 @@ async function askEventSourceQuestions(context, inputs) {
               startingPosition: 'LATEST',
               eventSourceArn: dynamoDBCategoryStorageStreamArnRef,
               functionTemplateName: 'trigger-dynamodb.js',
-              triggerPolicies: [{
-                Effect: 'Allow',
-                Action: [
-                  'dynamodb:DescribeStream',
-                  'dynamodb:GetRecords',
-                  'dynamodb:GetShardIterator',
-                  'dynamodb:ListStreams',
-                ],
-                Resource: dynamoDBCategoryStorageStreamArnRef,
-              }],
+              triggerPolicies: [
+                {
+                  Effect: 'Allow',
+                  Action: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+                  Resource: dynamoDBCategoryStorageStreamArnRef,
+                },
+              ],
             },
-            dependsOn: [{
-              category: 'storage',
-              resourceName: dynamoDBCategoryStorageRes.resourceName,
-              attributes: ['StreamArn'],
-            }],
+            dependsOn: [
+              {
+                category: 'storage',
+                resourceName: dynamoDBCategoryStorageRes.resourceName,
+                attributes: ['StreamArn'],
+              },
+            ],
           };
         default:
           return {};
@@ -742,87 +688,38 @@ async function askEventSourceQuestions(context, inputs) {
   }
 }
 
-async function askAPICategoryDynamoDBQuestions(context, inputs) {
-  const outputs = context.amplify.getResourceOutputs().outputsByCategory;
-  if (!('api' in outputs) || Object.keys(outputs.api).length === 0) {
-    throw Error('No resources have been configured in API category');
-  }
+async function askAnalyticsCategoryKinesisQuestions(context, inputs) {
+  const { amplify } = context;
+  const { allResources } = await amplify.getResourceStatus();
+  const kinesisResources = allResources.filter(resource => resource.service === 'Kinesis');
 
-  // let resourceNameInput, resourceNameQuestion, resourceNameAnswer, resourceName;
-  const apiOutput = outputs.api;
-  const resourceNames = Object.keys(apiOutput);
-  const resourceNameInput = inputs.find(input => input.key === 'dynamoDbAPIResourceName');
-  if (resourceNameInput === undefined) {
-    throw Error('Unable to find dynamoDbAPIResourceName question data. (this is likely an amplify error, please report)');
-  }
+  let targetResourceName;
+  if (kinesisResources.length === 0) {
+    context.print.error('No Kinesis streams resource to select. Please use "amplify add analytics" command to create a new Kinesis stream');
+    process.exit(0);
+    return;
+  } else if (kinesisResources.length === 1) {
+    targetResourceName = kinesisResources[0].resourceName;
+    context.print.success(`Selected resource ${targetResourceName}`);
+  } else {
+    const resourceNameInput = inputs.find(input => input.key === 'kinesisAnalyticsResourceName');
+    if (resourceNameInput === undefined) {
+      throw Error('Unable to find kinesisAnalyticsResourceName question data. (this is likely an amplify error, please report)');
+    }
 
-  const resourceNameQuestion = {
-    type: resourceNameInput.type,
-    name: resourceNameInput.key,
-    message: resourceNameInput.question,
-    choices: resourceNames,
-  };
+    const resourceNameQuestion = {
+      type: resourceNameInput.type,
+      name: resourceNameInput.key,
+      message: resourceNameInput.question,
+      choices: kinesisResources.map(resource => resource.resourceName),
+    };
 
-  const resourceNameAnswer = await inquirer.prompt([resourceNameQuestion]);
-  const resourceName = resourceNameAnswer[resourceNameInput.key];
-  const resourceOutput = apiOutput[resourceName];
-
-  const tableInfos = Object.keys(resourceOutput)
-    .map(outputName => outputName.match(/^NGetAtt(.*)(TableName|DataSourceName|TableStreamArn)$/))
-    .filter(match => match)
-    .map(([, tableName, outputType]) => ({
-      tableName,
-      outputType,
-      value: resourceOutput[`NGetAtt${tableName}${outputType}`],
-    }))
-    .reduce((infos, parsedOutput) => {
-      let partial;
-      switch (parsedOutput.outputType) {
-        case 'TableName':
-          partial = { name: parsedOutput.value };
-          break;
-        case 'DatasourceName':
-          partial = { datasourceName: parsedOutput.value };
-          break;
-        case 'TableStreamArn':
-          partial = { streamArn: parsedOutput.value };
-          break;
-        default:
-          partial = {};
-      }
-
-      return ({
-        ...infos,
-        [parsedOutput.tableName]: {
-          ...infos[parsedOutput.tableName] || {},
-          ...partial,
-        },
-      });
-    }, {});
-
-  const modelNameInput = inputs.find(input => input.key === 'graphqlAPIModelName');
-  if (modelNameInput === undefined) {
-    throw Error('Unable to find graphqlAPIModelName question data. (this is likely an amplify error, please report)');
-  }
-  if (Object.keys(tableInfos).length === 0) {
-    throw Error('Unable to find graphql model info.');
-  }
-
-  const modelNameQuestion = {
-    type: modelNameInput.type,
-    name: modelNameInput.key,
-    message: modelNameInput.question,
-    choices: Object.keys(tableInfos),
-  };
-  const modelNameAnswer = await inquirer.prompt([modelNameQuestion]);
-  const modelName = modelNameAnswer[modelNameInput.key];
-  const tableInfo = tableInfos[modelName];
-  if (!(('streamArn') in tableInfo)) {
-    throw Error(`Unable to find associated streamArn for ${tableInfo} model dynamoDb table.`);
+    const answer = await inquirer.prompt(resourceNameQuestion);
+    targetResourceName = answer.kinesisAnalyticsResourceName;
   }
 
   const streamArnParamRef = {
-    Ref: `api${resourceName}NGetAtt${modelName}TableStreamArn`,
+    Ref: `analytics${targetResourceName}kinesisStreamArn`,
   };
 
   return {
@@ -830,23 +727,138 @@ async function askAPICategoryDynamoDBQuestions(context, inputs) {
       batchSize: 100,
       startingPosition: 'LATEST',
       eventSourceArn: streamArnParamRef,
-      functionTemplateName: 'trigger-dynamodb.js',
-      triggerPolicies: [{
-        Effect: 'Allow',
-        Action: [
-          'dynamodb:DescribeStream',
-          'dynamodb:GetRecords',
-          'dynamodb:GetShardIterator',
-          'dynamodb:ListStreams',
-        ],
-        Resource: streamArnParamRef,
-      }],
+      functionTemplateName: 'trigger-custom.js',
+      triggerPolicies: [
+        {
+          Effect: 'Allow',
+          Action: [
+            'kinesis:DescribeStream',
+            'kinesis:DescribeStreamSummary',
+            'kinesis:GetRecords',
+            'kinesis:GetShardIterator',
+            'kinesis:ListShards',
+            'kinesis:ListStreams',
+            'kinesis:SubscribeToShard',
+          ],
+          Resource: streamArnParamRef,
+        },
+      ],
     },
-    dependsOn: [{
-      category: 'api',
-      resourceName,
-      attributes: [`NGetAtt${modelName}TableStreamArn`],
-    }],
+    dependsOn: [
+      {
+        category: 'analytics',
+        resourceName: targetResourceName,
+        attributes: ['kinesisStreamArn'],
+      },
+    ],
+  };
+}
+
+async function askAPICategoryDynamoDBQuestions(context, inputs) {
+  const { allResources } = await context.amplify.getResourceStatus();
+  const appSynchResources = allResources.filter(resource => resource.service === 'AppSync');
+
+  let targetResourceName;
+  if (appSynchResources.length === 0) {
+    context.print.error(`
+      No AppSync resources have been configured in API category. 
+      Please use "amplify add api" command to create a new appsync resource`);
+    process.exit(0);
+    return;
+  } else if (appSynchResources.length === 1) {
+    targetResourceName = appSynchResources[0].resourceName;
+    context.print.success(`Selected resource ${targetResourceName}`);
+  } else {
+    const resourceNameInput = inputs.find(input => input.key === 'dynamoDbAPIResourceName');
+    if (resourceNameInput === undefined) {
+      throw Error('Unable to find dynamoDbAPIResourceName question data. (this is likely an amplify error, please report)');
+    }
+
+    const resourceNameQuestion = {
+      type: resourceNameInput.type,
+      name: resourceNameInput.key,
+      message: resourceNameInput.question,
+      choices: appSynchResources.map(resource => resource.resourceName),
+    };
+
+    const answer = await inquirer.prompt(resourceNameQuestion);
+    targetResourceName = answer.dynamoDbAPIResourceName;
+  }
+
+  const targetResource = appSynchResources.find(resource => resource.resourceName === targetResourceName);
+  const resourceOutput = targetResource.output;
+  const graphqlAPIId = resourceOutput.GraphQLAPIIdOutput;
+  if (!graphqlAPIId) {
+    throw Error(`Unable to find graphql api id for ${targetResourceName} resource`);
+  }
+
+  const backendDir = context.amplify.pathManager.getBackendDirPath();
+  const resourceDirPath = path.join(backendDir, 'api', targetResourceName);
+  const project = await TransformPackage.readProjectConfiguration(resourceDirPath);
+  const directiveMap = TransformPackage.collectDirectivesByTypeNames(project.schema);
+  const modelNames = Object.keys(directiveMap.types).filter(typeName => directiveMap.types[typeName].includes('model'));
+
+  const modelNameInput = inputs.find(input => input.key === 'graphqlAPIModelName');
+  if (modelNameInput === undefined) {
+    throw Error('Unable to find graphqlAPIModelName question data. (this is likely an amplify error, please report)');
+  }
+
+  let targetModelNames = [];
+  if (modelNames.length === 0) {
+    throw Error('Unable to find graphql model info.');
+  } else if (modelNames.length === 1) {
+    const [modelName] = modelNames;
+    context.print.success(`Selected @model ${modelName}`);
+    targetModelNames = modelNames;
+  } else {
+    while (targetModelNames.length === 0) {
+      const modelNameQuestion = {
+        type: modelNameInput.type,
+        name: modelNameInput.key,
+        message: modelNameInput.question,
+        choices: modelNames,
+      };
+      const modelNameAnswer = await inquirer.prompt([modelNameQuestion]);
+      targetModelNames = modelNameAnswer[modelNameInput.key];
+
+      if (targetModelNames.length === 0) {
+        context.print.info('You need to select at least one @model');
+      }
+    }
+  }
+
+  const triggerEventSourceMappings = targetModelNames.map(modelName => {
+    const streamArnParamRef = {
+      'Fn::ImportValue': {
+        'Fn::Sub': [`\${api${targetResourceName}GraphQLAPIIdOutput}`, 'GetAtt', `${modelName}Table`, 'StreamArn'].join(':'),
+      },
+    };
+
+    return {
+      modelName,
+      batchSize: 100,
+      startingPosition: 'LATEST',
+      eventSourceArn: streamArnParamRef,
+      functionTemplateName: 'trigger-dynamodb.js',
+      triggerPolicies: [
+        {
+          Effect: 'Allow',
+          Action: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+          Resource: streamArnParamRef,
+        },
+      ],
+    };
+  });
+
+  return {
+    triggerEventSourceMappings,
+    dependsOn: [
+      {
+        category: 'api',
+        resourceName: targetResourceName,
+        attributes: ['GraphQLAPIIdOutput', 'GraphQLAPIEndpointOutput'],
+      },
+    ],
   };
 }
 
@@ -857,10 +869,9 @@ async function askDynamoDBQuestions(context, inputs, currentProjectOnly = false)
     message: inputs[5].question,
     choices: inputs[5].options,
   };
-  while (true) { //eslint-disable-line
-    const dynamoDbTypeAnswer = currentProjectOnly
-      ? { [inputs[5].key]: 'currentProject' }
-      : (await inquirer.prompt([dynamoDbTypeQuestion]));
+  while (true) {
+    //eslint-disable-line
+    const dynamoDbTypeAnswer = currentProjectOnly ? { [inputs[5].key]: 'currentProject' } : await inquirer.prompt([dynamoDbTypeQuestion]);
     switch (dynamoDbTypeAnswer[inputs[5].key]) {
       case 'currentProject': {
         const storageResources = context.amplify.getProjectDetails().amplifyMeta.storage;
@@ -869,7 +880,7 @@ async function askDynamoDBQuestions(context, inputs, currentProjectOnly = false)
           context.print.error('There are no DynamoDB resources configured in your project currently');
           break;
         }
-        Object.keys(storageResources).forEach((resourceName) => {
+        Object.keys(storageResources).forEach(resourceName => {
           if (storageResources[resourceName].service === 'DynamoDB') {
             dynamoDbProjectResources.push(resourceName);
           }
@@ -897,11 +908,10 @@ async function askDynamoDBQuestions(context, inputs, currentProjectOnly = false)
           context.print.error('Storage plugin is not installed in the CLI. You must install it to use this feature.');
           break;
         }
-        return add(context, 'awscloudformation', 'DynamoDB')
-          .then((resourceName) => {
-            context.print.success('Succesfully added DynamoDb table locally');
-            return { resourceName };
-          });
+        return add(context, 'awscloudformation', 'DynamoDB').then(resourceName => {
+          context.print.success('Succesfully added DynamoDb table locally');
+          return { resourceName };
+        });
       }
       /* eslint-disable */
 
@@ -940,7 +950,8 @@ async function askDynamoDBQuestions(context, inputs, currentProjectOnly = false)
       } */
 
       /* eslint-enable */
-      default: context.print.error('Invalid option selected');
+      default:
+        context.print.error('Invalid option selected');
     }
   }
 }
@@ -981,7 +992,6 @@ function migrate(context, projectPath, resourceName) {
       'ShouldNotCreateEnvResources',
       oldFunctionName,
       {
-
         'Fn::Join': [
           '',
           [
@@ -1005,7 +1015,6 @@ function migrate(context, projectPath, resourceName) {
       'ShouldNotCreateEnvResources',
       oldRoleName,
       {
-
         'Fn::Join': [
           '',
           [
@@ -1028,21 +1037,22 @@ function getIAMPolicies(resourceName, crudOptions) {
   let policy = {};
   const actions = [];
 
-  crudOptions.forEach((crudOption) => {
+  crudOptions.forEach(crudOption => {
     switch (crudOption) {
-      case 'create': actions.push(
-        'lambda:Create*',
-        'lambda:Put*',
-        'lambda:Add*',
-      );
+      case 'create':
+        actions.push('lambda:Create*', 'lambda:Put*', 'lambda:Add*');
         break;
-      case 'update': actions.push('lambda:Update*');
+      case 'update':
+        actions.push('lambda:Update*');
         break;
-      case 'read': actions.push('lambda:Get*', 'lambda:List*', 'lambda:Invoke*');
+      case 'read':
+        actions.push('lambda:Get*', 'lambda:List*', 'lambda:Invoke*');
         break;
-      case 'delete': actions.push('lambda:Delete*', 'lambda:Remove*');
+      case 'delete':
+        actions.push('lambda:Delete*', 'lambda:Remove*');
         break;
-      default: console.log(`${crudOption} not supported`);
+      default:
+        console.log(`${crudOption} not supported`);
     }
   });
 
@@ -1076,5 +1086,9 @@ function getIAMPolicies(resourceName, crudOptions) {
 }
 
 module.exports = {
-  serviceWalkthrough, updateWalkthrough, migrate, getIAMPolicies, askExecRolePermissionsQuestions,
+  serviceWalkthrough,
+  updateWalkthrough,
+  migrate,
+  getIAMPolicies,
+  askExecRolePermissionsQuestions,
 };

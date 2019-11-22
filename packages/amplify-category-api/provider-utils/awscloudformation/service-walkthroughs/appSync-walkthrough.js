@@ -2,6 +2,7 @@ const inquirer = require('inquirer');
 const fs = require('fs-extra');
 const path = require('path');
 const open = require('open');
+const TransformPackage = require('graphql-transformer-core');
 
 const category = 'api';
 const serviceName = 'AppSync';
@@ -16,11 +17,8 @@ function openConsole(context) {
   const amplifyMeta = context.amplify.getProjectMeta();
   const categoryAmplifyMeta = amplifyMeta[category];
   let appSyncMeta;
-  Object.keys(categoryAmplifyMeta).forEach((resourceName) => {
-    if (
-      categoryAmplifyMeta[resourceName].service === serviceName &&
-      categoryAmplifyMeta[resourceName].output
-    ) {
+  Object.keys(categoryAmplifyMeta).forEach(resourceName => {
+    if (categoryAmplifyMeta[resourceName].service === serviceName && categoryAmplifyMeta[resourceName].output) {
       appSyncMeta = categoryAmplifyMeta[resourceName].output;
     }
   });
@@ -40,7 +38,9 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
   const resourceName = resourceAlreadyExists(context);
 
   if (resourceName) {
-    context.print.warning('You already have an AppSync API in your project. Use the "amplify update api" command to update your existing AppSync API.');
+    context.print.warning(
+      'You already have an AppSync API in your project. Use the "amplify update api" command to update your existing AppSync API.'
+    );
     process.exit(0);
   }
 
@@ -110,10 +110,7 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
 
   // Write the default custom resources stack out to disk.
   const defaultCustomResourcesStack = fs.readFileSync(`${__dirname}/defaultCustomResources.json`);
-  fs.writeFileSync(
-    `${resourceDir}/${stacksDirName}/${defaultStackName}`,
-    defaultCustomResourcesStack,
-  );
+  fs.writeFileSync(`${resourceDir}/${stacksDirName}/${defaultStackName}`, defaultCustomResourcesStack);
 
   if (schemaFileAnswer[inputs[2].key]) {
     // User has an annotated schema file
@@ -222,12 +219,11 @@ async function serviceWalkthrough(context, defaultValuesFilename, serviceMetadat
       let notCompiled = true;
       while (notCompiled) {
         try {
-          await context.amplify.executeProviderUtils(
-            context,
-            'awscloudformation',
-            'compileSchema',
-            { resourceDir, parameters, authConfig },
-          );
+          await context.amplify.executeProviderUtils(context, 'awscloudformation', 'compileSchema', {
+            resourceDir,
+            parameters,
+            authConfig,
+          });
         } catch (e) {
           context.print.error('Failed compiling GraphQL schema:');
           context.print.info(e.message);
@@ -266,7 +262,9 @@ async function updateWalkthrough(context) {
     const resource = resources[0];
     if (resource.providerPlugin !== providerName) {
       // TODO: Move message string to seperate file
-      throw new Error(`The selected resource is not managed using AWS Cloudformation. Please use the AWS AppSync Console to make updates to your API - ${resource.resourceName}`);
+      throw new Error(
+        `The selected resource is not managed using AWS Cloudformation. Please use the AWS AppSync Console to make updates to your API - ${resource.resourceName}`
+      );
     }
     ({ resourceName } = resource);
     const backEndDir = context.amplify.pathManager.getBackendDirPath();
@@ -395,14 +393,12 @@ async function askSecurityQuestions(context, parameters) {
       authConfig.additionalAuthenticationProviders.push(config);
     }
   }
-  const additionalUserPoolProviders = authConfig.additionalAuthenticationProviders.filter(provider => provider.authenticationType === 'AMAZON_COGNITO_USER_POOLS');
-  const additionalUserPoolProvider =
-    additionalUserPoolProviders.length > 0 ? additionalUserPoolProviders[0] : undefined;
+  const additionalUserPoolProviders = authConfig.additionalAuthenticationProviders.filter(
+    provider => provider.authenticationType === 'AMAZON_COGNITO_USER_POOLS'
+  );
+  const additionalUserPoolProvider = additionalUserPoolProviders.length > 0 ? additionalUserPoolProviders[0] : undefined;
 
-  if (
-    authConfig.defaultAuthentication.authenticationType === 'AMAZON_COGNITO_USER_POOLS' ||
-    additionalUserPoolProvider
-  ) {
+  if (authConfig.defaultAuthentication.authenticationType === 'AMAZON_COGNITO_USER_POOLS' || additionalUserPoolProvider) {
     let userPoolId;
     const configuredUserPoolName = checkIfAuthExists(context);
 
@@ -501,7 +497,7 @@ async function askApiKeyQuestions() {
       type: 'input',
       name: 'apiKeyExpirationDays',
       message: 'After how many days from now the API key should expire (1-365):',
-      default: 180,
+      default: 7,
       validate: validateDays,
     },
   ];
@@ -566,7 +562,9 @@ function validateDays(input) {
 }
 
 function validateIssuerUrl(input) {
-  const isValid = /^(((?!http:\/\/(?!localhost))([a-zA-Z0-9.]{1,}):\/\/([a-zA-Z0-9-._~:?#@!$&'()*+,;=/]{1,})\/)|(?!http)(?!https)([a-zA-Z0-9.]{1,}):\/\/)$/.test(input);
+  const isValid = /^(((?!http:\/\/(?!localhost))([a-zA-Z0-9.]{1,}):\/\/([a-zA-Z0-9-._~:?#@!$&'()*+,;=/]{1,})\/)|(?!http)(?!https)([a-zA-Z0-9.]{1,}):\/\/)$/.test(
+    input
+  );
 
   if (!isValid) {
     return 'The value must be a valid URI with a trailing forward slash. HTTPS must be used instead of HTTP unless you are using localhost.';
@@ -592,7 +590,7 @@ function resourceAlreadyExists(context) {
 
   if (amplifyMeta[category]) {
     const categoryResources = amplifyMeta[category];
-    Object.keys(categoryResources).forEach((resource) => {
+    Object.keys(categoryResources).forEach(resource => {
       if (categoryResources[resource].service === serviceName) {
         resourceName = resource;
       }
@@ -611,7 +609,7 @@ function checkIfAuthExists(context) {
 
   if (amplifyMeta[authCategory] && Object.keys(amplifyMeta[authCategory]).length > 0) {
     const categoryResources = amplifyMeta[authCategory];
-    Object.keys(categoryResources).forEach((resource) => {
+    Object.keys(categoryResources).forEach(resource => {
       if (categoryResources[resource].service === authServiceName) {
         authResourceName = resource;
       }
@@ -627,11 +625,51 @@ async function migrate(context) {
   });
 }
 
-function getIAMPolicies(resourceName, crudOptions) {
+async function getIAMPolicies(context, resourceName, crudOptions) {
   let policy = {};
   const actions = [];
 
-  crudOptions.forEach((crudOption) => {
+  const restrictedAccessQuestion = {
+    type: 'confirm',
+    name: 'restrictedAccess',
+    message: 'Do you want to restrict the access to specific appsync @model(s)?',
+    default: false,
+  };
+
+  const restrictAccessResult = await inquirer.prompt(restrictedAccessQuestion);
+  let targetModelNames = [];
+  if (restrictAccessResult.restrictedAccess) {
+    const backendDir = context.amplify.pathManager.getBackendDirPath();
+    const resourceDirPath = path.join(backendDir, category, resourceName);
+    const project = await TransformPackage.readProjectConfiguration(resourceDirPath);
+    const directiveMap = TransformPackage.collectDirectivesByTypeNames(project.schema);
+    const modelNames = Object.keys(directiveMap.types).filter(typeName => directiveMap.types[typeName].includes('model'));
+
+    if (modelNames.length === 0) {
+      throw Error('Unable to find graphql model info.');
+    } else if (modelNames.length === 1) {
+      const [modelName] = modelNames;
+      context.print.success(`Selected @model ${modelName}`);
+      targetModelNames = modelNames;
+    } else {
+      while (targetModelNames.length === 0) {
+        const modelNameQuestion = {
+          type: 'checkbox',
+          name: 'modelDatasources',
+          message: 'Please choose graphql @models',
+          choices: modelNames,
+        };
+        const modelNameAnswer = await inquirer.prompt([modelNameQuestion]);
+        targetModelNames = modelNameAnswer.modelDatasources;
+
+        if (targetModelNames.length === 0) {
+          context.print.info('You need to select at least one @model');
+        }
+      }
+    }
+  }
+
+  crudOptions.forEach(crudOption => {
     switch (crudOption) {
       case 'create':
         actions.push('appsync:Create*', 'appsync:StartSchemaCreation', 'appsync:GraphQL');
@@ -650,27 +688,47 @@ function getIAMPolicies(resourceName, crudOptions) {
     }
   });
 
+  const resources =
+    targetModelNames.length > 0
+      ? targetModelNames.map(modelName => ({
+          'Fn::Join': [
+            '',
+            [
+              'arn:aws:appsync:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':apis/',
+              {
+                Ref: `${category}${resourceName}GraphQLAPIIdOutput`,
+              },
+              `/datasources/${modelName}Table`,
+            ],
+          ],
+        }))
+      : [
+          {
+            'Fn::Join': [
+              '',
+              [
+                'arn:aws:appsync:',
+                { Ref: 'AWS::Region' },
+                ':',
+                { Ref: 'AWS::AccountId' },
+                ':apis/',
+                {
+                  Ref: `${category}${resourceName}GraphQLAPIIdOutput`,
+                },
+                '/*',
+              ],
+            ],
+          },
+        ];
+
   policy = {
     Effect: 'Allow',
     Action: actions,
-    Resource: [
-      {
-        'Fn::Join': [
-          '',
-          [
-            'arn:aws:appsync:',
-            { Ref: 'AWS::Region' },
-            ':',
-            { Ref: 'AWS::AccountId' },
-            ':apis/',
-            {
-              Ref: `${category}${resourceName}GraphQLAPIIdOutput`,
-            },
-            '/*',
-          ],
-        ],
-      },
-    ],
+    Resource: resources,
   };
 
   const attributes = ['GraphQLAPIIdOutput', 'GraphQLAPIEndpointOutput'];
@@ -683,10 +741,7 @@ function getAuthTypes(authConfig) {
     .map(provider => provider.authenticationType)
     .filter(t => !!t);
 
-  const uniqueAuthTypes = new Set([
-    ...additionalAuthTypes,
-    authConfig.defaultAuthentication.authenticationType,
-  ]);
+  const uniqueAuthTypes = new Set([...additionalAuthTypes, authConfig.defaultAuthentication.authenticationType]);
 
   return [...uniqueAuthTypes.keys()];
 }

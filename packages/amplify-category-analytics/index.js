@@ -1,13 +1,45 @@
 const path = require('path');
+const inquirer = require('inquirer');
 const pinpointHelper = require('./lib/pinpoint-helper');
-const {
-  migrate,
-} = require('./provider-utils/awscloudformation/service-walkthroughs/pinpoint-walkthrough');
+const kinesisHelper = require('./lib/kinesis-helper');
+const { migrate } = require('./provider-utils/awscloudformation/service-walkthroughs/pinpoint-walkthrough');
 
 const category = 'analytics';
 
-function console(context) {
-  pinpointHelper.console(context);
+async function console(context) {
+  const hasKinesisResource = kinesisHelper.hasResource(context);
+  const hasPinpointResporce = pinpointHelper.hasResource(context);
+
+  let selectedResource;
+  if (hasKinesisResource && hasPinpointResporce) {
+    const questions = {
+      name: 'resource',
+      message: 'Select resource',
+      type: 'list',
+      choices: ['kinesis', 'pinpoint'],
+      required: true,
+    };
+
+    const result = await inquirer.prompt(questions);
+    selectedResource = result.resource;
+  } else if (hasKinesisResource) {
+    selectedResource = 'kinesis';
+  } else if (hasPinpointResporce) {
+    selectedResource = 'pinpoint';
+  } else {
+    context.print.error('Neither analytics nor notifications is enabled in the cloud.');
+  }
+
+  switch (selectedResource) {
+    case 'kinesis':
+      kinesisHelper.console(context);
+      break;
+    case 'pinpoint':
+      pinpointHelper.console(context);
+      break;
+    default:
+      break;
+  }
 }
 
 async function getPermissionPolicies(context, resourceOpsMapping) {
@@ -16,7 +48,7 @@ async function getPermissionPolicies(context, resourceOpsMapping) {
   const permissionPolicies = [];
   const resourceAttributes = [];
 
-  Object.keys(resourceOpsMapping).forEach((resourceName) => {
+  Object.keys(resourceOpsMapping).forEach(resourceName => {
     try {
       const providerController = require(`./provider-utils/${amplifyMeta[category][resourceName].providerPlugin}/index`);
       if (providerController) {
@@ -24,7 +56,7 @@ async function getPermissionPolicies(context, resourceOpsMapping) {
           context,
           amplifyMeta[category][resourceName].service,
           resourceName,
-          resourceOpsMapping[resourceName],
+          resourceOpsMapping[resourceName]
         );
         permissionPolicies.push(policy);
         resourceAttributes.push({ resourceName, attributes, category });
