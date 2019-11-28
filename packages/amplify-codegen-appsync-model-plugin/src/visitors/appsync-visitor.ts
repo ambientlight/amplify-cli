@@ -6,7 +6,8 @@ import {
   ParsedConfig,
   RawConfig,
 } from '@graphql-codegen/visitor-plugin-common';
-import { pascalCase, upperCase } from 'change-case';
+import { constantCase, pascalCase } from 'change-case';
+import { plural } from 'pluralize';
 import * as crypto from 'crypto';
 import {
   DefinitionNode,
@@ -20,7 +21,9 @@ import {
   parse,
   valueFromASTUntyped,
 } from 'graphql';
+import { addFieldToModel, removeFieldFromModel } from '../utils/fieldUtils';
 import { getTypeInfo } from '../utils/get-type-info';
+import { CodeGenConnectionType, CodeGenFieldConnection, processConnections } from '../utils/process-connections';
 import { sortFields } from '../utils/sort';
 
 export enum CodeGenGenerateEnum {
@@ -63,7 +66,7 @@ export interface RawAppSyncModelConfig extends RawConfig {
    *    - amplify-codegen-appsync-model-plugin
    * ```
    */
-  selectedType: string;
+  selectedType?: string;
 
   /**
    * @name generate
@@ -84,7 +87,7 @@ export interface RawAppSyncModelConfig extends RawConfig {
    *    - amplify-codegen-appsync-model-plugin
    * ```
    */
-  generate: CodeGenGenerateEnum;
+  generate?: CodeGenGenerateEnum;
   /**
    * @name directives
    * @type string
@@ -105,10 +108,12 @@ export type CodeGenDirective = {
   name: string;
   arguments: CodeGenArgumentsMap;
 };
+
 export type CodeGenDirectives = CodeGenDirective[];
 export type CodeGenField = TypeInfo & {
   name: string;
   directives: CodeGenDirectives;
+  connectionInfo?: CodeGenFieldConnection;
 };
 export type TypeInfo = {
   type: string;
@@ -136,7 +141,7 @@ export type CodeGenEnumValueMap = { [enumConvertedName: string]: string };
 
 export type CodeGenEnumMap = Record<string, CodeGenEnum>;
 
-export abstract class AppSyncModelVisitor<
+export class AppSyncModelVisitor<
   TRawConfig extends RawAppSyncModelConfig = RawAppSyncModelConfig,
   TPluginConfig extends ParsedAppSyncModelConfig = ParsedAppSyncModelConfig
 > extends BaseVisitor<TRawConfig, TPluginConfig> {
@@ -202,6 +207,7 @@ export abstract class AppSyncModelVisitor<
       ...getTypeInfo(node.type, this._schema),
     };
   }
+
   EnumTypeDefinition(node: EnumTypeDefinitionNode): void {
     if (this.typesToSkip.includes(node.name.value)) {
       // Skip Query, mutation and subscription type and additional
@@ -223,7 +229,10 @@ export abstract class AppSyncModelVisitor<
       values,
     };
   }
-  abstract generate(): string;
+  generate(): string {
+    this.processConnectionDirective();
+    return '';
+  }
 
   private getDirectives(directives: readonly DirectiveNode[] | undefined): CodeGenDirectives {
     if (directives) {
@@ -310,11 +319,11 @@ export abstract class AppSyncModelVisitor<
   }
 
   protected getModelName(model: CodeGenModel) {
-    return pascalCase(model.name);
+    return model.name;
   }
 
   protected getEnumValue(value: string): string {
-    return upperCase(value);
+    return constantCase(value);
   }
 
   protected isEnumType(field: CodeGenField): boolean {
@@ -375,5 +384,35 @@ export abstract class AppSyncModelVisitor<
         directives: [],
       });
     }
+  }
+
+  protected processConnectionDirective(): void {
+    Object.values(this.typeMap).forEach(model => {
+      model.fields.forEach(field => {
+        const connectionInfo = processConnections(field, model, this.typeMap);
+        if (connectionInfo) {
+          if (connectionInfo.kind === CodeGenConnectionType.HAS_MANY || connectionInfo.kind === CodeGenConnectionType.HAS_ONE) {
+            // Need to update the other side of the connection even if there is no connection directive
+            addFieldToModel(connectionInfo.connectedModel, connectionInfo.associatedWith);
+          } else {
+            // Need to remove the field that is targetName
+            removeFieldFromModel(model, connectionInfo.targetName);
+          }
+          field.connectionInfo = connectionInfo;
+        }
+      });
+    });
+  }
+
+  protected pluralizeModelName(model: CodeGenModel): string {
+    return plural(model.name);
+  }
+
+  get types() {
+    return this.typeMap;
+  }
+
+  get enums() {
+    return this.enumMap;
   }
 }

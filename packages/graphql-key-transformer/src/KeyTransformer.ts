@@ -1,18 +1,10 @@
-import {
-  Transformer,
-  gql,
-  TransformerContext,
-  getDirectiveArguments,
-  TransformerContractError,
-  InvalidDirectiveError,
-} from 'graphql-transformer-core';
+import { Transformer, gql, TransformerContext, getDirectiveArguments, InvalidDirectiveError } from 'graphql-transformer-core';
 import {
   obj,
   str,
   ref,
   printBlock,
   compoundExpression,
-  newline,
   raw,
   qref,
   set,
@@ -59,9 +51,8 @@ import {
   InputValueDefinitionNode,
   EnumTypeDefinitionNode,
 } from 'graphql';
-import { AppSync, IAM, Fn, DynamoDB, Refs } from 'cloudform-types';
+import { AppSync, Fn, Refs } from 'cloudform-types';
 import { Projection, GlobalSecondaryIndex, LocalSecondaryIndex } from 'cloudform-types/types/dynamoDb/table';
-import { fieldsConflictMessage } from 'graphql/validation/rules/OverlappingFieldsCanBeMerged';
 
 interface KeyArguments {
   name?: string;

@@ -2246,7 +2246,7 @@ found '${rule.provider}' assigned.`
     if (resolverConfig && resolverConfig.project) {
       return true;
     }
-    if (resolverConfig && resolverConfig.models[typeName]) {
+    if (resolverConfig && resolverConfig.models && resolverConfig.models[typeName]) {
       return true;
     }
     return false;

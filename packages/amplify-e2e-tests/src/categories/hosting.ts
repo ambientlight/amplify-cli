@@ -14,8 +14,11 @@ export function addHosting(cwd: string, verbose: boolean = !isCI()) {
       .wait('error doc for the website')
       .sendline('\r')
       .run((err: Error) => {
-        if (!err) resolve();
-        else reject(err);
+        if (!err) {
+          resolve();
+        } else {
+          reject(err);
+        }
       });
   });
 }
@@ -27,8 +30,11 @@ export function amplifyPush(cwd: string, verbose: boolean = !isCI()) {
       .wait('Are you sure you want to continue?')
       .sendline('\r')
       .run((err: Error) => {
-        if (!err) resolve();
-        else reject(err);
+        if (!err) {
+          resolve();
+        } else {
+          reject(err);
+        }
       });
   });
 }
@@ -43,8 +49,11 @@ export function removeHosting(cwd: string, verbose: boolean = !isCI()) {
       .sendline('\r')
       .wait('Successfully removed resource')
       .run((err: Error) => {
-        if (!err) resolve();
-        else reject(err);
+        if (!err) {
+          resolve();
+        } else {
+          reject(err);
+        }
       });
   });
 }
